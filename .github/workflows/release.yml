@@ -35,21 +35,21 @@ jobs:
           $headers=@{Authorization="Bearer $env:GH_TOKEN";Accept='application/vnd.github+json';'X-GitHub-Api-Version'='2022-11-28'}
           $api="https://api.github.com/repos/$env:GH_REPO/releases"
           $notes=@'
-          Самостоятельный VPNKRUT-SUB 3.0 для Windows x64. В одном MSI: приложение, официальный sing-box 1.14.4, Wintun 0.14.1 и общий каталог бесплатных серверов.
+          Самостоятельный VPNKRUT-SUB 3.0.1 для Windows x64. В одном MSI: приложение, официальный sing-box 1.14.4, Wintun 0.14.1 и общий каталог бесплатных серверов.
           
           Happ, INCY и v2rayTun не требуются. При подключении Windows запрашивает права администратора. Работающий другой VPN автоматически не отключается.
           
-          Alt+A: локальная админ-панель. Публикация каталога из программы требует токен владельца GitHub; пользователям токен не нужен.
+          Кнопка Админ убрана. Alt+A: локальная админ-панель. Возвращено автоподключение Happ для ChatGPT; флажок включён по умолчанию. Публикация каталога из программы требует токен владельца GitHub; пользователям токен не нужен.
           
           Проверены сборка, локальные тесты и 9 конфигураций через sing-box check. Реальное TUN-подключение и внешний IP не проверены: текущий VPN автора не отключался. Релиз предварительный. Бинарные файлы CI не подписаны доверенным сертификатом.
           '@
-          try{$release=Invoke-RestMethod -Uri "$api/tags/v3.0.0" -Headers $headers}
+          try{$release=Invoke-RestMethod -Uri "$api/tags/v3.0.1" -Headers $headers}
           catch{
             if([int]$_.Exception.Response.StatusCode -ne 404){throw}
-            $body=@{tag_name='v3.0.0';target_commitish=$env:GH_SHA;name='VPNKRUT-SUB 3.0 — встроенный VPN';body=$notes;draft=$false;prerelease=$true}|ConvertTo-Json
+            $body=@{tag_name='v3.0.1';target_commitish=$env:GH_SHA;name='VPNKRUT-SUB 3.0.1 — встроенный VPN';body=$notes;draft=$false;prerelease=$true}|ConvertTo-Json
             $release=Invoke-RestMethod -Method Post -Uri $api -Headers $headers -ContentType 'application/json; charset=utf-8' -Body ([Text.Encoding]::UTF8.GetBytes($body))
           }
-          $files=@('dist/VPNKRUT-SUB-3.0.0-Setup.msi','README.md','THIRD-PARTY.md','USER_AGREEMENT.md')
+          $files=@('dist/VPNKRUT-SUB-3.0.1-Setup.msi','README.md','THIRD-PARTY.md','USER_AGREEMENT.md')
           foreach($file in $files){
             $name=[IO.Path]::GetFileName($file)
             if($release.assets.name -contains $name){continue}
@@ -57,3 +57,4 @@ jobs:
             Invoke-RestMethod -Method Post -Uri $upload -Headers $headers -ContentType 'application/octet-stream' -InFile $file|Out-Null
           }
           Write-Output $release.html_url
+

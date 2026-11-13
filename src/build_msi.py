@@ -6,7 +6,7 @@ import msilib
 from msilib import schema, sequence, add_data, Dialog, Binary, CAB
 
 ROOT = Path(__file__).resolve().parent.parent
-VERSION = "3.0.0"
+VERSION = "3.0.1"
 UPGRADE = "{C784D197-9100-4C13-9CE2-746ED97AA676}"
 PRODUCT = "{" + str(uuid.uuid5(uuid.UUID(UPGRADE.strip("{}")), VERSION)).upper() + "}"
 OUTPUT = ROOT / "dist" / ("VPNKRUT-SUB-" + VERSION + "-Setup.msi")
@@ -76,7 +76,7 @@ def main():
     add_data(db, "Upgrade", [(UPGRADE, "0.0.0", VERSION, None, 257, None, "OLDPRODUCTS"),
         (UPGRADE, VERSION, None, None, 2, None, "NEWERFOUND")])
     add_data(db, "TextStyle", [("Body", "Segoe UI", 10, 0, 0), ("Heading", "Segoe UI", 17, 0, 1)])
-    dialog(db, "WelcomeDlg", "Install VPNKRUT-SUB", "Version 3.0.0\n\nInstalls a standalone VPN client for your Windows account, including the VPN engine. Adds desktop and Start menu shortcuts.\n\nConnections start only when requested in the app. Existing VPN clients will not be stopped.\n\nClick Install to continue.", "Install")
+    dialog(db, "WelcomeDlg", "Install VPNKRUT-SUB", "Version 3.0.1\n\nInstalls a standalone VPN client for your Windows account, including the VPN engine. Adds desktop and Start menu shortcuts.\n\nAuto-Happ can connect the existing Happ client when ChatGPT opens. Built-in VPN requires Connect. Existing VPN connections will not be stopped.\n\nClick Install to continue.", "Install")
     d = dialog(db, "MaintenanceDlg", "Remove VPNKRUT-SUB", "Click Remove to uninstall this version.\n\nYour VPN clients and saved helper settings will remain unchanged.", "Remove")
     # Set REMOVE before returning from the maintenance dialog.
     view = db.OpenView("DELETE FROM `ControlEvent` WHERE `Dialog_`='MaintenanceDlg' AND `Control_`='Proceed'")
@@ -107,6 +107,8 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
 
 
 

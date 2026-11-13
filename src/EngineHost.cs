@@ -11,7 +11,7 @@ using System.Windows.Forms;
 using System.Web.Script.Serialization;
 [assembly:AssemblyCompany("VPNKRUT-SUB")]
 [assembly:AssemblyProduct("VPNKRUT-SUB VPN engine host")]
-[assembly:AssemblyVersion("3.0.0.0")]
+[assembly:AssemblyVersion("3.0.1.0")]
 class EngineHost {
  static Process core;static Form window;static NotifyIcon tray;static Label info;static bool stopping,started;
  [DllImport("kernel32.dll",SetLastError=true)]static extern bool AttachConsole(uint id);
@@ -52,3 +52,4 @@ class EngineHost {
   }
  }
 }
+

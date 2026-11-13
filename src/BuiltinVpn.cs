@@ -46,8 +46,8 @@ partial class Program {
  static void ShowVpnDashboard(){
   if(panel!=null&&!panel.IsDisposed){panel.Show();panel.Activate();return;}
   panel=new Form{Text="VPNKRUT-SUB",Icon=BrandIcon(),ClientSize=new Size(720,700),BackColor=UiBack,ForeColor=UiInk,StartPosition=FormStartPosition.CenterScreen,FormBorderStyle=FormBorderStyle.FixedSingle,MaximizeBox=false,Font=new Font("Segoe UI",10)};
-  UiLabel(panel,"VPNKRUT-SUB",24,22,490,38,24,UiInk);UiLabel(panel,"СВОЙ VPN-КЛИЕНТ  /  3.0",26,69,490,23,9,UiMuted);
-  UiButton(panel,"Админ · Alt+A",545,34,151,delegate{ShowAdminLogin();},false);
+  UiLabel(panel,"VPNKRUT-SUB",24,22,490,38,24,UiInk);UiLabel(panel,"СВОЙ VPN-КЛИЕНТ  /  3.0.1",26,69,490,23,9,UiMuted);
+  var auto=new CheckBox{Left=390,Top=66,Width=306,Height=25,Text="Автоподключение Happ для ChatGPT",Checked=autoHapp,ForeColor=UiMuted};auto.CheckedChanged+=delegate{autoHapp=auto.Checked;nextHapp=DateTime.MinValue;SaveAutoHapp();};panel.Controls.Add(auto);
   var box=new Panel{Left=24,Top=112,Width=672,Height=88,BackColor=UiCard};panel.Controls.Add(box);UiLabel(box,"СОСТОЯНИЕ",17,13,630,19,8,UiMuted);status=UiLabel(box,lastInfo,17,40,630,37,12,UiInk);
   UiLabel(panel,"Бесплатные серверы",24,229,460,30,17,UiInk);
   var update=UiButton(panel,"Обновить список",530,220,166,null,false);
@@ -65,3 +65,4 @@ partial class Program {
   panel.Shown+=delegate{update.PerformClick();refreshTimer.Start();};panel.FormClosed+=delegate{refreshTimer.Dispose();};panel.Show();
  }
 }
+

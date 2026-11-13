@@ -15,8 +15,8 @@ using Accessibility;
 [assembly: AssemblyCompany("VPNKRUT-SUB")]
 [assembly: AssemblyProduct("VPNKRUT-SUB")]
 [assembly: AssemblyTitle("VPNKRUT-SUB")]
-[assembly: AssemblyVersion("3.0.0.0")]
-[assembly: AssemblyFileVersion("3.0.0.0")]
+[assembly: AssemblyVersion("3.0.1.0")]
+[assembly: AssemblyFileVersion("3.0.1.0")]
 partial class Program {
  static readonly string Home=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"ChatGPT-Happ");
  static readonly string Exe=Path.Combine(Home,"ChatGPTRefresh.exe");
@@ -108,7 +108,7 @@ partial class Program {
    if(!up)ready=DateTime.MaxValue;wasUp=up;
    IntPtr window=GetForegroundWindow();Page page=Inspect(window);
    bool app=Process.GetProcessesByName("ChatGPT").Any(p=>p.MainWindowHandle!=IntPtr.Zero&&IsWindowVisible(p.MainWindowHandle));
-   if(!up&&(page!=null||app)){SetStatus("Выберите сервер и нажмите Подключить в окне VPNKRUT-SUB");return;}
+   if(!up&&(page!=null||app)){RequestAutoHapp();return;}
    if(page!=null&&up&&DateTime.Now>=ready){
     string id=window.ToString()+":"+page.Key;
     long done;if(!refreshed.TryGetValue(id,out done)||done!=epoch){
@@ -130,7 +130,7 @@ partial class Program {
  [STAThread] static int Main(string[] args){
   if(args.Contains("--self-test"))return SelfTest();
   if(args.Contains("--diagnose")){var p=Inspect(GetForegroundWindow());File.WriteAllText(Path.Combine(Path.GetTempPath(),"ChatGPTHelper-diagnostic.txt"),"ChatGPT URL recognized="+(p!=null)+"; reload control="+(p!=null&&(p.Reload!=null||p.Legacy!=null)));return 0;}
-  Application.EnableVisualStyles();
+  Application.EnableVisualStyles(); LoadAutoHapp();
   bool created;mutex=new Mutex(true,"Local\\ChatGPTRefreshExe",out created);if(!created){if(args.Contains("--settings")){try{using(var signal=EventWaitHandle.OpenExisting("Local\\VPNKRUTSUB.ShowWindow")){signal.Set();}}catch{}}mutex.Dispose();return 0;}
   showWindowSignal=new EventWaitHandle(false,EventResetMode.AutoReset,"Local\\VPNKRUTSUB.ShowWindow");
   if(!ConfirmAgreement()){mutex.ReleaseMutex();mutex.Dispose();showWindowSignal.Dispose();return 0;}
@@ -142,6 +142,7 @@ partial class Program {
   try{Application.Run();}finally{if(adminHotkey!=null)adminHotkey.Dispose();timer.Dispose();icon.Dispose();mutex.ReleaseMutex();mutex.Dispose();if(showWindowSignal!=null)showWindowSignal.Dispose();}return 0;
  }
 }
+
 
 
 
