@@ -1,3 +1,10 @@
 *.log
 *.pdb
 .vs/
+
+.build-cache/
+engine/*.exe
+engine/*.dll
+dist/*.exe
+dist/*.msi
+

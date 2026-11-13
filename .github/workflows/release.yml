@@ -1,4 +1,4 @@
-name: Publish release
+name: Build standalone VPN release
 on:
   push:
     branches: [main]
@@ -11,35 +11,49 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Publish v1.1.1
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Get verified official VPN engine
+        shell: powershell
+        run: ./fetch-engine.ps1
+      - name: Build and run local checks
+        shell: powershell
+        run: |
+          ./build.ps1
+          ./src/check_engine.ps1
+          python ./src/build_msi.py
+          if ($LASTEXITCODE -ne 0) { throw 'MSI build failed' }
+      - name: Publish preliminary standalone release
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           GH_SHA: ${{ github.sha }}
         run: |
-          $ErrorActionPreference = 'Stop'
-          $headers = @{Authorization="Bearer $env:GH_TOKEN"; Accept='application/vnd.github+json'; 'X-GitHub-Api-Version'='2022-11-28'}
-          $api = "https://api.github.com/repos/$env:GH_REPO/releases"
-          $notes = @'
-          Windows x64: установщик, расширение Chrome с мини-окном и локальный помощник состояния VPN.
-
-          Скачайте ChatGPTRefresh-Setup.exe и запустите один раз. После установки откроется README с инструкцией подключения расширения в Chrome.
-
-          VPN и Happ эта сборка не отключает. Сборка и синтаксис проверены; полная установка после перезагрузки пока не проверена. EXE не подписан.
+          $ErrorActionPreference='Stop'
+          $headers=@{Authorization="Bearer $env:GH_TOKEN";Accept='application/vnd.github+json';'X-GitHub-Api-Version'='2022-11-28'}
+          $api="https://api.github.com/repos/$env:GH_REPO/releases"
+          $notes=@'
+          Самостоятельный VPNKRUT-SUB 3.0 для Windows x64. В одном MSI: приложение, официальный sing-box 1.14.4, Wintun 0.14.1 и общий каталог бесплатных серверов.
+          
+          Happ, INCY и v2rayTun не требуются. При подключении Windows запрашивает права администратора. Работающий другой VPN автоматически не отключается.
+          
+          Alt+A: локальная админ-панель. Публикация каталога из программы требует токен владельца GitHub; пользователям токен не нужен.
+          
+          Проверены сборка, локальные тесты и 9 конфигураций через sing-box check. Реальное TUN-подключение и внешний IP не проверены: текущий VPN автора не отключался. Релиз предварительный. Бинарные файлы CI не подписаны доверенным сертификатом.
           '@
-          try { $release = Invoke-RestMethod -Uri "$api/tags/v1.1.1" -Headers $headers }
-          catch {
-            if ([int]$_.Exception.Response.StatusCode -ne 404) { throw }
-            $body = @{tag_name='v1.1.1';target_commitish=$env:GH_SHA;name='VPN ChatGPT v1.1.1';body=$notes;draft=$false;prerelease=$true} | ConvertTo-Json
-            $release = Invoke-RestMethod -Method Post -Uri $api -Headers $headers -ContentType 'application/json; charset=utf-8' -Body ([Text.Encoding]::UTF8.GetBytes($body))
+          try{$release=Invoke-RestMethod -Uri "$api/tags/v3.0.0" -Headers $headers}
+          catch{
+            if([int]$_.Exception.Response.StatusCode -ne 404){throw}
+            $body=@{tag_name='v3.0.0';target_commitish=$env:GH_SHA;name='VPNKRUT-SUB 3.0 — встроенный VPN';body=$notes;draft=$false;prerelease=$true}|ConvertTo-Json
+            $release=Invoke-RestMethod -Method Post -Uri $api -Headers $headers -ContentType 'application/json; charset=utf-8' -Body ([Text.Encoding]::UTF8.GetBytes($body))
           }
-          Compress-Archive -Path 'extension/*' -DestinationPath 'ChatGPT-VPN-Refresh-v1.1.1.zip' -Force
-          $files = @('dist/ChatGPTRefresh-Setup.exe','ChatGPT-VPN-Refresh-v1.1.1.zip','README.md')
-          foreach ($file in $files) {
-            $name = [IO.Path]::GetFileName($file)
-            if ($release.assets.name -contains $name) { continue }
-            $upload = "https://uploads.github.com/repos/$env:GH_REPO/releases/$($release.id)/assets?name=$([Uri]::EscapeDataString($name))"
-            Invoke-RestMethod -Method Post -Uri $upload -Headers $headers -ContentType 'application/octet-stream' -InFile $file | Out-Null
+          $files=@('dist/VPNKRUT-SUB-3.0.0-Setup.msi','README.md','THIRD-PARTY.md','USER_AGREEMENT.md')
+          foreach($file in $files){
+            $name=[IO.Path]::GetFileName($file)
+            if($release.assets.name -contains $name){continue}
+            $upload="https://uploads.github.com/repos/$env:GH_REPO/releases/$($release.id)/assets?name=$([Uri]::EscapeDataString($name))"
+            Invoke-RestMethod -Method Post -Uri $upload -Headers $headers -ContentType 'application/octet-stream' -InFile $file|Out-Null
           }
           Write-Output $release.html_url

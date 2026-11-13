@@ -2,132 +2,153 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
+using System.Linq;
+using System.Management;
 using System.Net.NetworkInformation;
+using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Text;
-using System.Text.RegularExpressions;
 using System.Threading;
 using System.Windows.Automation;
 using System.Windows.Forms;
-class ChatGPTRefresh {
+using Accessibility;
+[assembly: AssemblyCompany("VPNKRUT-SUB")]
+[assembly: AssemblyProduct("VPNKRUT-SUB")]
+[assembly: AssemblyTitle("VPNKRUT-SUB")]
+[assembly: AssemblyVersion("3.0.0.0")]
+[assembly: AssemblyFileVersion("3.0.0.0")]
+partial class Program {
+ static readonly string Home=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"ChatGPT-Happ");
+ static readonly string Exe=Path.Combine(Home,"ChatGPTRefresh.exe");
+ static readonly string Startup=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Startup),"ChatGPTRefresh.lnk");
+ static readonly HashSet<string> Browsers=new HashSet<string>{"chrome","msedge","brave","opera","browser","vivaldi","firefox"};
+ static NotifyIcon icon; static Label status; static Form panel; static bool busy,wasUp; static long epoch;
+ static DateTime ready=DateTime.MaxValue, nextHapp=DateTime.MinValue; static string lastInfo="Ожидание ChatGPT";
+ static EventWaitHandle showWindowSignal;
+ static Dictionary<string,long> refreshed=new Dictionary<string,long>(); static Mutex mutex;
  [DllImport("user32.dll")] static extern IntPtr GetForegroundWindow();
  [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr h,out uint id);
- [DllImport("user32.dll",CharSet=CharSet.Unicode)] static extern int GetWindowText(IntPtr h,StringBuilder b,int n);
- [DllImport("user32.dll",SetLastError=true)] static extern IntPtr SendMessageTimeout(IntPtr h,uint m,IntPtr w,IntPtr l,uint f,uint t,out UIntPtr result);
- static readonly string Dir=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"ChatGPT-Happ");
- static readonly Regex Title=new Regex(@"\bChat\s?GPT\b",RegexOptions.IgnoreCase);
- static readonly Regex Url=new Regex(@"^(https?://)?(www\.)?(chatgpt\.com|chat\.openai\.com)([/:?#]|$)",RegexOptions.IgnoreCase);
- static bool previousUp=false,pending=false,busy=false;
- static string lastRequest="";
- static DateTime ready=DateTime.MaxValue;
- static HashSet<IntPtr> refreshed=new HashSet<IntPtr>();
- static NotifyIcon tray;
- static void Log(string s){try{Directory.CreateDirectory(Dir);File.AppendAllText(Path.Combine(Dir,"exe-refresh.log"),DateTime.Now.ToString("s")+" "+s+Environment.NewLine);}catch{}}
- static bool Connected(){foreach(var a in NetworkInterface.GetAllNetworkInterfaces())if(a.OperationalStatus==OperationalStatus.Up && Regex.IsMatch(a.Name+" "+a.Description,"happ|xray",RegexOptions.IgnoreCase))return true;return false;}
- static string Request(){try{var lines=File.ReadAllLines(Path.Combine(Dir,"status.log"));for(int i=lines.Length-1;i>=Math.Max(0,lines.Length-12);i--)if(lines[i].Contains("Connect requested;"))return lines[i];}catch{}return "";}
- static bool IsChat(IntPtr h){
-  uint id;GetWindowThreadProcessId(h,out id);
-  string name;try{name=Process.GetProcessById((int)id).ProcessName.ToLowerInvariant();}catch{return false;}
-  if(!new HashSet<string>{"chrome","msedge","firefox","brave","opera","browser","vivaldi"}.Contains(name))return false;
-  var title=new StringBuilder(2048);GetWindowText(h,title,title.Capacity);
-  if(Title.IsMatch(title.ToString()))return true;
+ [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr h);
+ [DllImport("user32.dll")] static extern bool ShowWindowAsync(IntPtr h,int command);
+ [DllImport("oleacc.dll")] static extern int AccessibleObjectFromWindow(IntPtr h,uint id,ref Guid iid,[MarshalAs(UnmanagedType.Interface)] out object result);
+ [DllImport("oleacc.dll")] static extern int AccessibleChildren(IAccessible parent,int start,int count,[Out,MarshalAs(UnmanagedType.LPArray,SizeParamIndex=2)]object[] children,out int obtained);
+ class Page { public string Key; public AutomationElement Reload; public IAccessible Legacy; public object Child=0; }
+ static string ReadmePath(){string packaged=Path.Combine(Application.StartupPath,"README.txt");return File.Exists(packaged)?packaged:Path.Combine(Home,"README.md");}
+ static void Log(string text){try{Directory.CreateDirectory(Home);string p=Path.Combine(Home,"standalone.log");if(File.Exists(p)&&new FileInfo(p).Length>524288)File.WriteAllText(p,"");File.AppendAllText(p,DateTime.Now.ToString("s")+" "+text+Environment.NewLine);}catch{}}
+ static bool ChatUrl(string value,out string key){
+  key=null;if(String.IsNullOrWhiteSpace(value))return false;
+  value=value.Trim();Uri uri;
+  if(!Uri.TryCreate(value.Contains("://")?value:"https://"+value,UriKind.Absolute,out uri))return false;
+  if(uri.Scheme!="https"&&uri.Scheme!="http")return false;
+  if(uri.Host!="chatgpt.com"&&uri.Host!="www.chatgpt.com"&&uri.Host!="chat.openai.com")return false;
+  key=uri.Host+uri.AbsolutePath;return true;
+ }
+ static bool AddressName(string name){name=(name??"").ToLowerInvariant();return name.Contains("address")||name.Contains("адрес")||name.Contains("omnibox")||name.Contains("urlbar")||name.Contains("поиск или");}
+ static bool ReloadName(string name){name=(name??"").Trim().ToLowerInvariant();return name=="reload"||name=="reload this page"||name=="refresh"||name=="перезагрузить"||name=="обновить"||name=="обновить эту страницу"||name=="перезагрузить страницу";}
+ static Page Inspect(IntPtr window){
+  uint pid;GetWindowThreadProcessId(window,out pid);
+  try{if(!Browsers.Contains(Process.GetProcessById((int)pid).ProcessName.ToLowerInvariant()))return null;}catch{return null;}
+  var page=new Page();
   try{
-   var root=AutomationElement.FromHandle(h);
-   var edits=root.FindAll(TreeScope.Descendants,new PropertyCondition(AutomationElement.ControlTypeProperty,ControlType.Edit));
-   foreach(AutomationElement e in edits){
-    string label=e.Current.Name+" "+e.Current.AutomationId;
-    if(!Regex.IsMatch(label,"address|адрес|omnibox|urlbar|поиск или",RegexOptions.IgnoreCase))continue;
-    object value;if(e.TryGetCurrentPattern(ValuePattern.Pattern,out value)&&Url.IsMatch(((ValuePattern)value).Current.Value.Trim()))return true;
+   var root=AutomationElement.FromHandle(window);
+   var toolbarCondition=new PropertyCondition(AutomationElement.ControlTypeProperty,ControlType.ToolBar);
+   var toolbars=root.FindAll(TreeScope.Descendants,toolbarCondition);
+   foreach(AutomationElement toolbar in toolbars){
+    foreach(AutomationElement e in toolbar.FindAll(TreeScope.Descendants,Condition.TrueCondition)){
+     string name=e.Current.Name;object pattern;
+     if(AddressName(name+" "+e.Current.AutomationId)&&e.TryGetCurrentPattern(ValuePattern.Pattern,out pattern)){
+      string key;if(ChatUrl(((ValuePattern)pattern).Current.Value,out key))page.Key=key;
+     }
+     if(e.Current.ControlType==ControlType.Button&&ReloadName(name))page.Reload=e;
+    }
    }
-  }catch(Exception ex){Log("Address lookup: "+ex.GetType().Name);}
+  }catch(Exception ex){Log("UIA lookup: "+ex.GetType().Name);}
+  if(page.Key==null||page.Reload==null){
+   try{Guid iid=new Guid("618736E0-3C3D-11CF-810C-00AA00389B71");object obj;
+    if(AccessibleObjectFromWindow(window,0xFFFFFFFC,ref iid,out obj)>=0&&obj is IAccessible){int budget=700;Scan((IAccessible)obj,0,0,ref budget,page);}
+   }catch(Exception ex){Log("MSAA lookup: "+ex.GetType().Name);}
+  }
+  return page.Key==null?null:page;
+ }
+ static void Scan(IAccessible acc,object child,int depth,ref int budget,Page page){
+  if(budget--<=0||depth>18)return;
+  try{
+   int role=Convert.ToInt32(acc.get_accRole(child));string name=acc.get_accName(child)??"";
+   if(AddressName(name)){string key;if(ChatUrl(acc.get_accValue(child),out key))page.Key=key;}
+   if(role==43&&ReloadName(name)){page.Legacy=acc;page.Child=child;}
+   // Do not traverse webpage documents: only browser chrome is relevant.
+   if(role==15||!(child is int)||(int)child!=0)return;
+   int count=Math.Min(acc.accChildCount,120);if(count<=0)return;
+   object[] children=new object[count];int got;
+   if(AccessibleChildren(acc,0,count,children,out got)<0)return;
+   for(int i=0;i<got&&budget>0;i++){
+    if(children[i] is IAccessible)Scan((IAccessible)children[i],0,depth+1,ref budget,page);
+    else if(children[i] is int)Scan(acc,children[i],depth+1,ref budget,page);
+   }
+  }catch{}
+ }
+ static bool Reload(IntPtr window,Page page){
+  if(GetForegroundWindow()!=window)return false;
+  try{
+   object pattern;
+   if(page.Reload!=null&&page.Reload.Current.IsEnabled&&page.Reload.TryGetCurrentPattern(InvokePattern.Pattern,out pattern)){((InvokePattern)pattern).Invoke();Log("Reload button invoked via UI Automation");return true;}
+   if(page.Legacy!=null){page.Legacy.accDoDefaultAction(page.Child);Log("Reload button invoked via MSAA");return true;}
+  }catch(Exception ex){Log("Reload failed: "+ex.Message);}
   return false;
  }
- static bool Refresh(IntPtr window){
-  if(GetForegroundWindow()!=window)return false;
-  UIntPtr handled;
-  var sent=SendMessageTimeout(window,0x0319,window,new IntPtr(3<<16),2,1000,out handled);
-  if(sent!=IntPtr.Zero && handled!=UIntPtr.Zero){Log("Browser accepted refresh command");return true;}
-  if(GetForegroundWindow()!=window)return false;
-  SendKeys.SendWait("{F5}");Log("F5 sent to ChatGPT browser window");return true;
- }
- static void Tick(object sender,EventArgs args){
+ static bool Tunnel(){return OwnVpnActive()||ExternalVpnActive();}
+
+ static System.Drawing.Icon BrandIcon(){using(var stream=Assembly.GetExecutingAssembly().GetManifestResourceStream("Brand.ico")){using(var original=new System.Drawing.Icon(stream)){return (System.Drawing.Icon)original.Clone();}}}
+ static void SetStatus(string value){if(lastInfo!=value){lastInfo=value;Log(value);}if(status!=null&&!status.IsDisposed)status.Text=lastInfo;}
+ static void Tick(object sender,EventArgs e){
+  if(showWindowSignal!=null&&showWindowSignal.WaitOne(0))OpenPanel();
   if(busy)return;busy=true;
   try{
-   bool up=Connected();string request=Request();bool newRequest=request!=""&&request!=lastRequest;
-   if(newRequest)lastRequest=request;
-   if(up&&(!previousUp||newRequest)){pending=true;ready=DateTime.Now.AddSeconds(3);refreshed.Clear();Log("VPN connection detected; refresh queued");}
-   if(!up){pending=false;refreshed.Clear();}
-   tray.Text=up?"ChatGPT: VPN подключён":"ChatGPT: ожидание VPN";
-   IntPtr window=GetForegroundWindow();
-   if(up&&DateTime.Now>=ready&&!refreshed.Contains(window)&&IsChat(window)){
-    if(Refresh(window)){refreshed.Add(window);pending=false;}
+   bool up=Tunnel();if(up&&!wasUp){epoch++;ready=DateTime.Now.AddMilliseconds(800);Log("VPN adapter up; refresh queued");}
+   if(!up)ready=DateTime.MaxValue;wasUp=up;
+   IntPtr window=GetForegroundWindow();Page page=Inspect(window);
+   bool app=Process.GetProcessesByName("ChatGPT").Any(p=>p.MainWindowHandle!=IntPtr.Zero&&IsWindowVisible(p.MainWindowHandle));
+   if(!up&&(page!=null||app)){SetStatus("Выберите сервер и нажмите Подключить в окне VPNKRUT-SUB");return;}
+   if(page!=null&&up&&DateTime.Now>=ready){
+    string id=window.ToString()+":"+page.Key;
+    long done;if(!refreshed.TryGetValue(id,out done)||done!=epoch){
+     if(Reload(window,page)){refreshed[id]=epoch;SetStatus("Команда обновления ChatGPT отправлена");}
+     else SetStatus("Кнопка обновления браузера недоступна");
+    }
    }
-   previousUp=up;
-  }catch(Exception ex){Log("Error: "+ex.ToString());}
+   else SetStatus(up?"VPN подключён · ожидание вкладки ChatGPT":"Ожидание VPN");
+   icon.Text=up?"VPNKRUT-SUB · VPN подключён":"VPNKRUT-SUB · ожидание VPN";
+  }catch(Exception ex){SetStatus("Ошибка: "+ex.GetType().Name);Log(ex.ToString());}
   finally{busy=false;}
  }
- static bool InstallForUser(){
-  try {
-   Directory.CreateDirectory(Dir);
-   string current=Application.ExecutablePath;
-   string installed=Path.Combine(Dir,"ChatGPTRefresh.exe");
-   if(!String.Equals(current,installed,StringComparison.OrdinalIgnoreCase)) {
-    foreach(var process in Process.GetProcessesByName("ChatGPTRefresh")) {
-     try {if(process.Id!=Process.GetCurrentProcess().Id && String.Equals(process.MainModule.FileName,installed,StringComparison.OrdinalIgnoreCase)){process.Kill();process.WaitForExit(2000);}}catch{}
-    }
-    File.Copy(current,installed,true);
-   var assembly=System.Reflection.Assembly.GetExecutingAssembly();
-   string extensionDir=Path.Combine(Dir,"extension");Directory.CreateDirectory(extensionDir);
-   foreach(string resource in assembly.GetManifestResourceNames()){
-    string destination=null;
-    if(resource.StartsWith("extension."))destination=Path.Combine(extensionDir,resource.Substring(10));
-    else if(resource=="README.md")destination=Path.Combine(Dir,"README.md");
-    else if(resource=="VpnStatusHost.exe")destination=Path.Combine(extensionDir,"VpnStatusHost.exe");
-    if(destination!=null)using(var input=assembly.GetManifestResourceStream(resource))using(var output=File.Create(destination)){input.CopyTo(output);}
-   }
-   string hostExe=Path.Combine(extensionDir,"VpnStatusHost.exe");
-   var serializer=new System.Web.Script.Serialization.JavaScriptSerializer();
-   string hostJson=serializer.Serialize(new {name="com.chatgpt_happ.status",description="Read-only Happ VPN status",path=hostExe,type="stdio",allowed_origins=new string[]{"chrome-extension://ibdbopmjjoidijofindggapmndoecbhk/"}});
-   string hostManifest=Path.Combine(extensionDir,"native-host.json");File.WriteAllText(hostManifest,hostJson,new UTF8Encoding(false));
-   using(var registry=Microsoft.Win32.Registry.CurrentUser.CreateSubKey(@"Software\Google\Chrome\NativeMessagingHosts\com.chatgpt_happ.status")){registry.SetValue("",hostManifest);}
-   }
-   dynamic shell=Activator.CreateInstance(Type.GetTypeFromProgID("WScript.Shell"));
-   dynamic shortcut=shell.CreateShortcut(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Startup),"ChatGPTRefresh.lnk"));
-   shortcut.TargetPath=installed;
-   shortcut.WorkingDirectory=Dir;
-   shortcut.Description="ChatGPT Refresh";
-   shortcut.Save();
-   Marshal.FinalReleaseComObject(shortcut);
-   Marshal.FinalReleaseComObject(shell);
-   if(!String.Equals(current,installed,StringComparison.OrdinalIgnoreCase)) {
-    Process.Start(new ProcessStartInfo(installed){UseShellExecute=true,WindowStyle=ProcessWindowStyle.Hidden});
-    Process.Start(new ProcessStartInfo("notepad.exe", "\""+Path.Combine(Dir,"README.md")+"\""){UseShellExecute=true});
-    try {
-     string browser=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles),@"Google\Chrome\Application\chrome.exe");
-     if(!File.Exists(browser))browser=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),@"Google\Chrome\Application\chrome.exe");
-     if(!File.Exists(browser))browser="chrome.exe";
-     Process.Start(new ProcessStartInfo(browser,"chrome://extensions/"){UseShellExecute=true});
-    } catch {MessageBox.Show("Откройте в Chrome страницу chrome://extensions.","Подключение расширения");}
-    Process.Start(new ProcessStartInfo("explorer.exe","\""+Path.Combine(Dir,"extension")+"\""){UseShellExecute=true});
-    return false;
-   }
-   return true;
-  }catch(Exception ex){MessageBox.Show("Не удалось установить автозагрузку: "+ex.Message,"ChatGPT Refresh",MessageBoxButtons.OK,MessageBoxIcon.Error);return false;}
+ static void OpenPanel(){ShowDashboard();}
+ static int SelfTest(){
+  string key;foreach(string s in new[]{"https://chatgpt.com/","chat.openai.com/c/123","https://www.chatgpt.com/c/abc"})if(!ChatUrl(s,out key))return 1;
+  foreach(string s in new[]{"https://chatgpt.com.evil.example/","https://example.com/chatgpt.com","file:///chatgpt.com","https://playerok.com/"})if(ChatUrl(s,out key))return 2;
+  if(Assembly.GetExecutingAssembly().GetManifestResourceStream("README.md")==null)return 3; using(var brand=BrandIcon()){if(brand.Width<16)return 4;} int admin=TestAdminStore();if(admin!=0)return admin;int catalog=TestPublicCatalog();if(catalog!=0)return catalog;return TestVpnConfig();
  }
- [STAThread] static void Main(){
-  if(!InstallForUser())return;
-  bool created;using(var mutex=new Mutex(true,"Local\\ChatGPTRefreshExe",out created)){
-   if(!created)return;
-   Application.EnableVisualStyles();
-   tray=new NotifyIcon{Icon=System.Drawing.SystemIcons.Information,Visible=true,Text="ChatGPT: ожидание VPN"};
-   var menu=new ContextMenuStrip();
-   menu.Items.Add("Выход",null,delegate{Application.Exit();});tray.ContextMenuStrip=menu;
-   var timer=new System.Windows.Forms.Timer{Interval=500};timer.Tick+=Tick;timer.Start();
-   Log("EXE started");
-   try{Application.Run();}finally{tray.Visible=false;tray.Dispose();mutex.ReleaseMutex();}
-  }
+ [STAThread] static int Main(string[] args){
+  if(args.Contains("--self-test"))return SelfTest();
+  if(args.Contains("--diagnose")){var p=Inspect(GetForegroundWindow());File.WriteAllText(Path.Combine(Path.GetTempPath(),"ChatGPTHelper-diagnostic.txt"),"ChatGPT URL recognized="+(p!=null)+"; reload control="+(p!=null&&(p.Reload!=null||p.Legacy!=null)));return 0;}
+  Application.EnableVisualStyles();
+  bool created;mutex=new Mutex(true,"Local\\ChatGPTRefreshExe",out created);if(!created){if(args.Contains("--settings")){try{using(var signal=EventWaitHandle.OpenExisting("Local\\VPNKRUTSUB.ShowWindow")){signal.Set();}}catch{}}mutex.Dispose();return 0;}
+  showWindowSignal=new EventWaitHandle(false,EventResetMode.AutoReset,"Local\\VPNKRUTSUB.ShowWindow");
+  if(!ConfirmAgreement()){mutex.ReleaseMutex();mutex.Dispose();showWindowSignal.Dispose();return 0;}
+  icon=new NotifyIcon{Icon=BrandIcon(),Text="VPNKRUT-SUB",Visible=true};
+  var menu=new ContextMenuStrip();menu.Items.Add("Открыть окно",null,delegate{OpenPanel();});menu.Items.Add("Инструкция",null,delegate{Process.Start("notepad.exe","\""+ReadmePath()+"\"");});menu.Items.Add("Выход",null,delegate{Application.Exit();});icon.ContextMenuStrip=menu;icon.DoubleClick+=delegate{OpenPanel();};
+  adminHotkey=new AdminHotkey();
+  var timer=new System.Windows.Forms.Timer{Interval=350};timer.Tick+=Tick;timer.Start();Log("Standalone 3.0 started");
+  if(args.Contains("--settings"))OpenPanel();
+  try{Application.Run();}finally{if(adminHotkey!=null)adminHotkey.Dispose();timer.Dispose();icon.Dispose();mutex.ReleaseMutex();mutex.Dispose();if(showWindowSignal!=null)showWindowSignal.Dispose();}return 0;
  }
 }
+
+
+
+
+
+
+
 
 
 
