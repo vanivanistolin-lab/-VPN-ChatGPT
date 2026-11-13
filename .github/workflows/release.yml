@@ -11,7 +11,7 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Publish v1.1.0
+      - name: Publish v1.1.1
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
@@ -28,14 +28,14 @@ jobs:
 
           VPN и Happ эта сборка не отключает. Сборка и синтаксис проверены; полная установка после перезагрузки пока не проверена. EXE не подписан.
           '@
-          try { $release = Invoke-RestMethod -Uri "$api/tags/v1.1.0" -Headers $headers }
+          try { $release = Invoke-RestMethod -Uri "$api/tags/v1.1.1" -Headers $headers }
           catch {
             if ([int]$_.Exception.Response.StatusCode -ne 404) { throw }
-            $body = @{tag_name='v1.1.0';target_commitish=$env:GH_SHA;name='VPN ChatGPT v1.1.0';body=$notes;draft=$false;prerelease=$true} | ConvertTo-Json
+            $body = @{tag_name='v1.1.1';target_commitish=$env:GH_SHA;name='VPN ChatGPT v1.1.1';body=$notes;draft=$false;prerelease=$true} | ConvertTo-Json
             $release = Invoke-RestMethod -Method Post -Uri $api -Headers $headers -ContentType 'application/json; charset=utf-8' -Body ([Text.Encoding]::UTF8.GetBytes($body))
           }
-          Compress-Archive -Path 'extension/*' -DestinationPath 'ChatGPT-VPN-Refresh-v1.1.0.zip' -Force
-          $files = @('dist/ChatGPTRefresh-Setup.exe','ChatGPT-VPN-Refresh-v1.1.0.zip','README.md')
+          Compress-Archive -Path 'extension/*' -DestinationPath 'ChatGPT-VPN-Refresh-v1.1.1.zip' -Force
+          $files = @('dist/ChatGPTRefresh-Setup.exe','ChatGPT-VPN-Refresh-v1.1.1.zip','README.md')
           foreach ($file in $files) {
             $name = [IO.Path]::GetFileName($file)
             if ($release.assets.name -contains $name) { continue }

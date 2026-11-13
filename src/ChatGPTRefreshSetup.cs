@@ -102,6 +102,13 @@ class ChatGPTRefresh {
    if(!String.Equals(current,installed,StringComparison.OrdinalIgnoreCase)) {
     Process.Start(new ProcessStartInfo(installed){UseShellExecute=true,WindowStyle=ProcessWindowStyle.Hidden});
     Process.Start(new ProcessStartInfo("notepad.exe", "\""+Path.Combine(Dir,"README.md")+"\""){UseShellExecute=true});
+    try {
+     string browser=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles),@"Google\Chrome\Application\chrome.exe");
+     if(!File.Exists(browser))browser=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),@"Google\Chrome\Application\chrome.exe");
+     if(!File.Exists(browser))browser="chrome.exe";
+     Process.Start(new ProcessStartInfo(browser,"chrome://extensions/"){UseShellExecute=true});
+    } catch {MessageBox.Show("Откройте в Chrome страницу chrome://extensions.","Подключение расширения");}
+    Process.Start(new ProcessStartInfo("explorer.exe","\""+Path.Combine(Dir,"extension")+"\""){UseShellExecute=true});
     return false;
    }
    return true;
@@ -121,6 +128,7 @@ class ChatGPTRefresh {
   }
  }
 }
+
 
 
 
